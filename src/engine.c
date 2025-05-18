@@ -5,12 +5,13 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 Engine engine;
 
 void engine_init() {
     engine.window.dimensions = (Rectangle) {
-        0, 0, 3200, 2000
+        0, 0, 640, 640
     };
     engine.targetFPS = 60;
 
@@ -20,22 +21,45 @@ void engine_init() {
         "Raia"
     );
     SetTargetFPS(engine.targetFPS);
-    ToggleFullscreen();
+    //ToggleFullscreen();
 
     engine.view.dimensions = (Rectangle) {
         0, 0, 
-        engine.window.dimensions.width / 4,
-        engine.window.dimensions.height / 4
+        engine.window.dimensions.width / 2,
+        engine.window.dimensions.height / 2
     };
     engine.view.renderTexture = LoadRenderTexture(
         engine.view.dimensions.width,
         engine.view.dimensions.height
     );
 
+    // Load Sprites
+    engine.spriteAtlas = LoadImage("assets/SpriteAtlas.png");
+    engine.spriteAmount = engine.spriteAtlas.width * engine.spriteAtlas.height / TEX_SIZE;
+
+    engine.sprites = malloc(sizeof(Sprite) * engine.spriteAmount);
+
+    for (int i = 0; i < engine.spriteAmount; i++) {
+        engine.sprites[i].sprite = ImageFromImage(engine.spriteAtlas, (Rectangle) {
+            (i % TEX_SIZE) * TEX_SIZE,
+            0,
+            TEX_SIZE,
+            TEX_SIZE
+        });
+        engine.sprites[i].pixels = LoadImageColors(engine.sprites[i].sprite);
+    }
+
+    // Handle Object Initialization
     objects_init();
+
 }
 
 void engine_deinit() {
+    for (int i = 0; i < engine.spriteAmount; i++) {
+        UnloadImage(engine.sprites[i].sprite);
+        UnloadImageColors(engine.sprites[i].pixels);
+    }
+    free(engine.sprites);
     objects_deinit();
     CloseWindow();
 }
@@ -55,7 +79,7 @@ void engine_draw() {
     BeginTextureMode(engine.view.renderTexture);
     ClearBackground(BLACK);
     objects_draw();
-    DrawFPS(8, 8);
+    
     EndTextureMode();
 
     BeginDrawing();
@@ -70,6 +94,7 @@ void engine_draw() {
         source,
         dimension, 
         (Vector2) {0, 0}, 0, WHITE);
+    DrawFPS(8, 8);
     EndDrawing();
 }
 
@@ -209,7 +234,7 @@ Ray2D ray2D_castRay(Vector2 position, float angle) {
 void raycast_observe(Vector2 position, float angle) {
     float fidelity = 1.0f;
     int rayNumber = (int)(engine.view.dimensions.width * fidelity);
-    float fov = 70 * PI / 180;
+    float fov = 60 * PI / 180;
     float angleStep = fov / rayNumber;
     float angleInitial = angle - (angleStep * rayNumber / 2);
 
@@ -220,32 +245,96 @@ void raycast_observe(Vector2 position, float angle) {
         float rayAngle = angleInitial + (i * angleStep);
         Ray2D ray = ray2D_castRay(position, rayAngle);
 
-        // Cosine Fix
-        float cosineAngle = clamp_angle(angle - rayAngle);
-        ray.distance *= cos(cosineAngle);
-
         // Drawing Walls
+        float overcorrectionCoef = 1.0f;
+        float fixedAngle = cos(clamp_angle((angle - rayAngle) * overcorrectionCoef)); // Get the orthographic angle to correct for fish eye.
+
+        ray.distance *= fixedAngle;         // Cosine Fix
+
         float povWallHeight = wallHeight / ray.distance;    // WALL RATIO
-        if (povWallHeight > wallHeight) povWallHeight = wallHeight;
 
-        // Textures
-        Vector2 texelPosition = {
-            ray.destination.x - floor(ray.destination.x),
-            0
-        };
+        float texelYStep = 1 / povWallHeight;
+        float texelYOffset = 0;
+        float garbageShitFix = (engine.view.dimensions.height / 320) * 158;
 
-        // Draw wall segment.
-        for (int p = 0; p < povWallHeight; p++) {
-            texelPosition.y = p / povWallHeight;
-            // Color
-            Color color = SAMPLE_TEX[(int)(texelPosition.x * TEX_SIZE) + (int)(texelPosition.y * TEX_SIZE) * TEX_SIZE];
+        // Clamping walls to not draw bigger than the screen.
+        if (povWallHeight > wallHeight) {
+            texelYOffset = povWallHeight - wallHeight; // When we chop off the excess we need to save the texture offset to begin the texture strip in the right place.
+            povWallHeight = wallHeight;
+        }
+
+        // Build Screen Cross Section
+        Vector2 texelPosition = { 0.0f, 0.0f };
+        int wallStart = engine.view.dimensions.height / 2 - povWallHeight / 2; // Represents the top of the wall segment.
+        int p = 0; // Pixel iterator for wall and floor segment.
+
+
+        // Draw ceiling segment.
+        for (int j = wallStart; j >= 0; j--) {
+            float pDeltaY = j - (engine.view.dimensions.height / 2.0);    // Distance of projection plane pixel from the horizon.
+
+            // Texture
+            texelPosition = (Vector2) { 
+                objects.player.position.x - cos(rayAngle) * garbageShitFix / pDeltaY / fixedAngle, 
+                objects.player.position.y - sin(rayAngle) * garbageShitFix / pDeltaY / fixedAngle
+            };
+
+            texelPosition.x = texelPosition.x - floor(texelPosition.x);
+            texelPosition.y = texelPosition.y - floor(texelPosition.y);
 
             DrawRectangle(
                 i * screenDrawStep,
-                engine.view.dimensions.height / 2 - povWallHeight / 2 + p,
+                j,
+                screenDrawStep,
+                1,
+                engine.sprites[2].pixels[(int)(texelPosition.x * TEX_SIZE) + (int)(texelPosition.y * TEX_SIZE) * TEX_SIZE]
+            );
+        }
+
+        // Draw wall segment.
+        // Set Texture Position
+        if (ray.direction == 0) {
+            texelPosition.x = ray.destination.x - floor(ray.destination.x);
+        } else {
+            texelPosition.x = ray.destination.y - floor(ray.destination.y);
+        }
+        texelPosition.y = texelYStep * texelYOffset / 2;
+
+        for (p = wallStart; p < wallStart + povWallHeight; p++) {
+
+            // Texture
+            Color color = engine.sprites[1].pixels[(int)(texelPosition.x * TEX_SIZE) + (int)(texelPosition.y * TEX_SIZE) * TEX_SIZE];
+            if (ray.direction == 1) color = ColorBrightness(color, -0.3);
+
+            DrawRectangle(
+                i * screenDrawStep,
+                p,
                 screenDrawStep,
                 1,
                 color
+            );
+
+            texelPosition.y += texelYStep;
+        }
+
+        // Draw floor segment.
+        for (;p < engine.view.dimensions.height; p++) {
+            float pDeltaY = p - (engine.view.dimensions.height / 2.0);    // Distance of projection plane pixel from the horizon.
+
+            texelPosition = (Vector2) { 
+                objects.player.position.x + cos(rayAngle) * garbageShitFix / pDeltaY / fixedAngle, 
+                objects.player.position.y + sin(rayAngle) * garbageShitFix / pDeltaY / fixedAngle
+            };
+
+            texelPosition.x = texelPosition.x - floor(texelPosition.x);
+            texelPosition.y = texelPosition.y - floor(texelPosition.y);
+
+            DrawRectangle(
+                i * screenDrawStep,
+                p,
+                screenDrawStep,
+                1,
+                engine.sprites[0].pixels[(int)(texelPosition.x * TEX_SIZE) + (int)(texelPosition.y * TEX_SIZE) * TEX_SIZE]
             );
         }
 

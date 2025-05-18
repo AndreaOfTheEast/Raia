@@ -80,7 +80,7 @@ void level_draw(Level* level) {
 void player_init(Player* player) {
     player->position = (Vector2) { objects.level.dimensions.width / 2, objects.level.dimensions.height / 2 };
     player->angle = PI * 2 - PI / 4;
-    player->turnSpeed = 0.02f;
+    player->turnSpeed = 0.02134f;
     player->speed = 0.07f;
 }
 void player_deinit(Player* player) {}

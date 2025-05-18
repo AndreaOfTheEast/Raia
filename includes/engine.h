@@ -3,14 +3,12 @@
 
 #include "raylib.h"
 
-#define TEX_SIZE 4
+#define TEX_SIZE 32
 
-static Color SAMPLE_TEX[TEX_SIZE * TEX_SIZE] = {
-    WHITE, BLACK, WHITE, BLACK, 
-    BLACK, WHITE, BLACK, WHITE,
-    WHITE, BLACK, WHITE, BLACK, 
-    BLACK, WHITE, BLACK, WHITE
-};
+typedef struct Sprite {
+    Image sprite;
+    Color* pixels;
+} Sprite;
 
 typedef struct View {
     Rectangle dimensions;
@@ -26,6 +24,12 @@ typedef struct Engine {
     View view;
 
     int targetFPS;
+
+    // Sprites
+    Image spriteAtlas;
+    Sprite* sprites;
+    int spriteAmount;
+
 } Engine;
 
 extern Engine engine;
@@ -43,7 +47,7 @@ float point_distance(Vector2 a, Vector2 b);
 typedef struct Ray2D {
     Vector2 origin;
     Vector2 destination;
-    float distance;
+    double distance;
     int direction;
 } Ray2D;
 
